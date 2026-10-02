@@ -34,6 +34,14 @@ fi
 # 会走直连 —— 被墙的站点就永远转圈（日志里全是 ssl_client_socket_impl
 # handshake failed / net_error -100）。这里显式指向本机代理，但仅当该代理
 # 确实在监听时才加。可用 VNC_PROXY=host:port 覆盖。
+#
+# 输入法：VNC 会话不是桌面登录，拿不到 GTK_IM_MODULE/XMODIFIERS，
+# GTK 会退回 dummy IM context，完全打不出中文。指向 fcitx 后，
+# 会话总线会按需自动拉起 fcitx5（org.fcitx.Fcitx5 的 D-Bus 激活）。
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+
 PROXY_ADDR="${VNC_PROXY:-127.0.0.1:7897}"
 PROXY_PORT="${PROXY_ADDR##*:}"
 if ss -lnt "sport = :$PROXY_PORT" 2>/dev/null | grep -q LISTEN; then

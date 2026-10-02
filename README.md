@@ -291,6 +291,56 @@ exec "$CHROME" --user-data-dir="$VNC_PROFILE" --password-store=basic "$@"
   或在 `xstartup` 里用密码解锁），但这会削弱钥匙环的静态保护，需要自行权衡。
 - 同样**只对新启动的浏览器生效**。
 
+### 第四个问题：VNC 里打不出中文（输入法没接上）
+
+现象：VNC 桌面里打不出中文，只能输英文。
+
+原因：VNC 会话不是桌面登录，`xstartup` 里也没有输入法变量，所以会话环境里
+**完全没有** `GTK_IM_MODULE` / `QT_IM_MODULE` / `XMODIFIERS`（物理 GNOME 会话有，
+是 gnome-session 带上的）。GTK 拿不到 IM 模块就退回 dummy IM context，
+XFCE 的 XSETTINGS 里也没有 `Gtk/IMModule`：
+
+```bash
+# 修之前 :2 上 GTK 读到的值
+gtk-im-module = None
+```
+
+而且 fcitx5 只有物理屏 `:0` 那一个（登录时 gnome-session 拉起的），`:2` 上没有。
+
+修复（三处，互为补充）：
+
+```bash
+# 1) 让 :2 的 GTK 知道用 fcitx —— XSETTINGS 是热生效的，不必重启应用
+DISPLAY=:2 DBUS_SESSION_BUS_ADDRESS=<vnc-bus> \
+  xfconf-query -c xsettings -p /Gtk/IMModule -n -t string -s fcitx
+
+# 2) 会话环境变量（写进 ~/.vnc/xstartup，下次会话生效）
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+
+# 3) wrapper 里也带上，保证面板启动的 Chrome 一定拿到
+```
+
+fcitx5 不用手动常驻：`org.fcitx.Fcitx5` 有 D-Bus 激活，第一个请求它的客户端
+会把守护进程拉起来（会话日志里可见 `Activating service name='org.fcitx.Fcitx5'
+... Successfully activated`）。
+
+验证：
+
+```bash
+gtk-im-module = fcitx                                # :2 上 GTK 读到的值
+gdbus ... NameHasOwner org.fcitx.Fcitx5 → (true,)    # VNC 总线上守护进程在线
+```
+
+注意两点：
+
+- `~/.vnc/xstartup` 的改动要**下次 VNC 会话启动**才生效。如果 `dsh web` 就跑在
+  VNC 会话里，重启 VNC 服务会把它一起杀掉 —— 那就先用 XSETTINGS 热修 +
+  wrapper 环境变量顶上，别急着重启服务。
+- 日志里可能出现 `Failed to load pinyin dict ...zhwiki....dict: Invalid pinyin
+  version.`，那是额外词库版本不匹配，内置拼音不受影响。
+
 ## 8. 会话日志与自动轮转
 
 `~/.vnc/<主机名>:<RFB端口>.log` 是 TigerVNC 的会话日志，例如 `~/.vnc/user-NUC12:5901.log`。
