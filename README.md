@@ -189,7 +189,7 @@ Chrome 对**同一个配置目录只允许一个实例**。物理 GNOME 会话�
 
 | 文件 | 作用 |
 | --- | --- |
-| `~/.local/bin/session-browser` | 按会话分流：物理控制台（`WAYLAND_DISPLAY` 存在或 `DISPLAY=:0`）用原配置；其它会话（VNC）用 `--user-data-dir=~/.config/google-chrome-vnc`，并显式加 `--proxy-server`（见下节） |
+| `~/.local/bin/session-browser` | 按会话分流：物理控制台（`WAYLAND_DISPLAY` 存在或 `DISPLAY=:0`）用原配置；其它会话（VNC）用 `--user-data-dir=~/.config/google-chrome-vnc`，并显式加 `--proxy-server` 和 `--password-store=basic`（见下面两节） |
 | `~/.local/share/xfce4/helpers/google-chrome.desktop` | 覆盖系统 XFCE 助手。系统那个是 `X-XFCE-Commands=%B;`，直接调 `google-chrome-stable`，必须覆盖它，否则面板图标绕过一切设置 |
 | `~/.config/xfce4/helpers.rc` | 加 `WebBrowser=google-chrome`，让 `exo-open --launch WebBrowser` 固定用上面的助手 |
 | `~/.local/share/applications/google-chrome.desktop` | 用户级 GIO 默认浏览器覆盖，管住 `xdg-open`、应用菜单、点击链接 |
@@ -245,6 +245,52 @@ fi
 > 这里只修了浏览器。VNC 的终端里 `git`/`curl` 等仍然没有代理（`xstartup` 没导出
 > `http_proxy`）。需要的话在 `~/.vnc/xstartup` 里补上 `http_proxy`/`https_proxy`/`all_proxy`/`no_proxy`。
 
+### 第三个问题：标签页永远转圈、页面不提交（VNC 会话没有可用的 Secret Service）
+
+代理修好之后页面**仍然**打不开：标签页一直转圈、地址栏是搜索 URL、页面停在"新标签页"，
+而 clash 那边**能看到请求、也有数据回来**（`www.google.com` down=4044），说明网络是通的。
+
+用 `--log-net-log` 抓 netlog 对比后定位：渲染进程发起的导航停在
+`COMPUTED_PRIVACY_MODE` 之后、`NETWORK_DELEGATE_BEFORE_START_TRANSACTION` 之前
+（同一份 netlog 里 Chrome 后台请求能完整走完 129 个事件），也就是
+**卡在浏览器/委托这一层，不是网络层**。
+
+真正原因是：VNC 会话自己的 D-Bus 上没有可用的 `org.freedesktop.secrets`。实测：
+
+```bash
+# 物理会话：立刻返回（服务在，只是锁着）
+gdbus call --session --dest org.freedesktop.secrets \
+  --object-path /org/freedesktop/secrets/collection/login \
+  --method org.freedesktop.DBus.Properties.Get org.freedesktop.Secret.Collection Locked
+# → (<true>,)
+
+# VNC 会话：直接超时（服务不存在或不响应）
+DBUS_SESSION_BUS_ADDRESS=<vnc-bus> gdbus call ...（同上）
+# → 错误：已到超时限制
+```
+
+Chrome 启动时要向钥匙环取加密密钥，这个调用**永不返回**，浏览器进程就卡住了；
+后台请求不走这条路，所以照常成功。物理屏正常是因为登录时 PAM 已经把钥匙环
+交给 GNOME 会话了，而 `vnc-user.service` 不经过 PAM。
+
+（也试过在 VNC 总线里手动 `gnome-keyring-daemon --daemonize --components=secrets`，
+服务仍然不响应，所以采用下面的方案。）
+
+修复：VNC 分支加 `--password-store=basic`，改用 Chrome 自带的密码库，不碰钥匙环。
+
+```sh
+exec "$CHROME" --user-data-dir="$VNC_PROFILE" --password-store=basic "$@"
+```
+
+代价与注意：
+
+- 从物理配置复制过来、用钥匙环密钥加密的 **Cookie / 已保存密码在 VNC 里解不开**，
+  所以 VNC 的浏览器需要**重新登录**各网站；书签、历史、扩展不受影响。
+- 物理屏的 Chrome 与它的钥匙环数据完全不受影响。
+- 想彻底避免重新登录，正解是让 VNC 会话能解锁"登录"钥匙环（例如把钥匙环密码设为空，
+  或在 `xstartup` 里用密码解锁），但这会削弱钥匙环的静态保护，需要自行权衡。
+- 同样**只对新启动的浏览器生效**。
+
 ## 8. 会话日志与自动轮转
 
 `~/.vnc/<主机名>:<RFB端口>.log` 是 TigerVNC 的会话日志，例如 `~/.vnc/user-NUC12:5901.log`。
@@ -299,10 +345,16 @@ sudo systemctl restart vnc-user.service
 
 见第 7 节；并确认 `xstartup` 里的 `unset WAYLAND_DISPLAY` 还在。
 
-**VNC 里浏览器页面一直转圈、日志全是 `handshake failed`**
+**VNC 里浏览器页面一直转圈**
 
-代理没生效。见第 7 节"第二个问题"；先确认代理在监听（`ss -lnt 'sport = :7897'`），
-然后**关掉 VNC 里已经在运行的浏览器重新打开** —— 代理参数只在启动时生效。
+两种原因，按顺序排查（详见第 7 节）：
+
+1. 日志里全是 `handshake failed` / `net_error -100` → 代理没生效，
+   先确认代理在监听（`ss -lnt 'sport = :7897'`）。
+2. 日志里没有握手失败、clash 里也能看到请求有数据回来 → 是 VNC 会话的钥匙环
+   Secret Service 不响应造成的卡死，确认 `session-browser` 里带了 `--password-store=basic`。
+
+两种都**只对新启动的浏览器生效**，改完要关掉 VNC 里已在运行的浏览器重新打开。
 
 **日志文件飞快变大**
 

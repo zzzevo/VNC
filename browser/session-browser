@@ -42,4 +42,10 @@ if ss -lnt "sport = :$PROXY_PORT" 2>/dev/null | grep -q LISTEN; then
 fi
 
 mkdir -p "$VNC_PROFILE"
-exec "$CHROME" --user-data-dir="$VNC_PROFILE" "$@"
+# VNC 会话自己的 D-Bus 上没有可用的 Secret Service：调用 org.freedesktop.secrets
+# 永远不返回（实测超时），Chrome 的浏览器进程因此卡住，渲染进程发起的导航永远
+# 不提交 —— 标签页一直转圈，而后台请求却正常。这里改用 Chrome 自带的密码库，
+# 不走钥匙环。
+# 代价：随配置一起复制过来、用钥匙环密钥加密的 Cookie/密码在这里解不开，
+# 需要在 VNC 里重新登录网站；物理屏及其数据完全不受影响。
+exec "$CHROME" --user-data-dir="$VNC_PROFILE" --password-store=basic "$@"
