@@ -1,0 +1,32 @@
+#!/bin/sh
+# session-browser - 用"属于当前会话"的 Chrome 配置打开浏览器。
+#
+# 背景
+# ----
+# Chrome 对同一个 --user-data-dir 只允许一个实例。物理 GNOME 控制台
+# (Wayland, DISPLAY=:0) 和 TigerVNC/XFCE 会话 (DISPLAY=:2) 是同一个用户，
+# 因此共用 ~/.config/google-chrome。在 VNC 里点浏览器时，新进程会把请求
+# 转发给控制台里那个实例然后退出（"正在现有的浏览器会话中打开。"），
+# 窗口就跑到主机接的物理显示器上了。
+#
+# 分流规则
+# --------
+#   物理控制台 / Wayland 会话 -> ~/.config/google-chrome       （保持原样）
+#   其它会话（VNC 等）        -> ~/.config/google-chrome-vnc   （独立实例）
+#
+# 独立配置目录首次由现有配置复制而来（同一份 "Profile 1"：历史、Cookie、
+# 已保存密码、扩展）。此后两边各自独立，想保持一致请登录 Chrome 同步。
+
+set -eu
+
+CHROME=/usr/bin/google-chrome-stable
+VNC_PROFILE="$HOME/.config/google-chrome-vnc"
+
+# 物理控制台会话继续用共享配置。
+if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${DISPLAY:-}" = ":0" ]; then
+    exec "$CHROME" "$@"
+fi
+
+# VNC / 其它远程 X 会话用自己的配置目录，因而有自己的实例、自己的显示器窗口。
+mkdir -p "$VNC_PROFILE"
+exec "$CHROME" --user-data-dir="$VNC_PROFILE" "$@"

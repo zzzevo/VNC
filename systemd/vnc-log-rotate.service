@@ -1,0 +1,6 @@
+[Unit]
+Description=Rotate TigerVNC session logs (~/.vnc/*.log)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/logrotate --state %h/.vnc/.logrotate.state %h/.vnc/logrotate.conf

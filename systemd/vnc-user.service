@@ -1,0 +1,18 @@
+[Unit]
+Description=VNC desktop for user
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=user
+Group=user
+WorkingDirectory=/home/user
+Environment=HOME=/home/user
+ExecStart=/usr/bin/vncserver -fg -localhost no :2 -rfbport 5901 -geometry 1920x1080 -depth 24
+ExecStop=/usr/bin/vncserver -kill :2
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

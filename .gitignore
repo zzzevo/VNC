@@ -1,0 +1,8 @@
+# 敏感/运行时文件，绝不提交
+passwd
+*.log
+*.log.[0-9]*
+*.log.[0-9].gz
+*.pid
+.logrotate.state
+*.backup-*

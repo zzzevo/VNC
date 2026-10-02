@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly rotation of TigerVNC session logs
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

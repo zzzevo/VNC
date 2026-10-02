@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Icon=google-chrome
+Type=X-XFCE-Helper
+Name=Google Chrome
+Name[zh_CN]=谷歌 Chrome（按会话独立）
+StartupNotify=true
+X-XFCE-Binaries=google-chrome;google-chrome-stable;
+X-XFCE-Category=WebBrowser
+X-XFCE-Commands=/home/user/.local/bin/session-browser;
+X-XFCE-CommandsWithParameter=/home/user/.local/bin/session-browser "%s";

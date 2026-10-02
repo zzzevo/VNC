@@ -1,0 +1,12 @@
+#!/bin/sh
+# VNC (XFCE) 会话启动脚本 —— 放到 ~/.vnc/xstartup 并 chmod +x
+#
+# 关键点：VNC 会话必须和物理 GNOME(Wayland) 会话完全隔离，否则
+#   - 应用会被物理会话的 D-Bus 激活，窗口跑到物理显示器上；
+#   - GTK/Qt 程序会去连 Wayland，报 "cannot open display: wayland-0"。
+unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS
+unset WAYLAND_DISPLAY WAYLAND_SOCKET
+export XDG_SESSION_TYPE=x11
+export GDK_BACKEND=x11
+export QT_QPA_PLATFORM=xcb
+exec dbus-run-session -- xfce4-session
