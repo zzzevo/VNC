@@ -189,7 +189,7 @@ Chrome 对**同一个配置目录只允许一个实例**。物理 GNOME 会话�
 
 | 文件 | 作用 |
 | --- | --- |
-| `~/.local/bin/session-browser` | 按会话分流：物理控制台（`WAYLAND_DISPLAY` 存在或 `DISPLAY=:0`）用原配置；其它会话（VNC）用 `--user-data-dir=~/.config/google-chrome-vnc` |
+| `~/.local/bin/session-browser` | 按会话分流：物理控制台（`WAYLAND_DISPLAY` 存在或 `DISPLAY=:0`）用原配置；其它会话（VNC）用 `--user-data-dir=~/.config/google-chrome-vnc`，并显式加 `--proxy-server`（见下节） |
 | `~/.local/share/xfce4/helpers/google-chrome.desktop` | 覆盖系统 XFCE 助手。系统那个是 `X-XFCE-Commands=%B;`，直接调 `google-chrome-stable`，必须覆盖它，否则面板图标绕过一切设置 |
 | `~/.config/xfce4/helpers.rc` | 加 `WebBrowser=google-chrome`，让 `exo-open --launch WebBrowser` 固定用上面的助手 |
 | `~/.local/share/applications/google-chrome.desktop` | 用户级 GIO 默认浏览器覆盖，管住 `xdg-open`、应用菜单、点击链接 |
@@ -211,6 +211,39 @@ bash browser/install.sh
   想保持一致就登录 Chrome 同步。
 - 首次在 VNC 里打开 Chrome，可能弹出"解锁登录密钥环"，输入登录密码即可
   （Chrome 需要它解密已保存的密码）。VNC 会话没有 PAM 密码，所以这个钥匙环不会自动解锁。
+
+### 第二个问题：VNC 里页面一直转圈加载不出来（代理）
+
+窗口归属修好之后，VNC 里的 Chrome 能开了，但打开 google 之类的站点**一直转圈**，
+`~/.vnc/user-NUC12:5901.log` 里刷的是：
+
+```text
+[ERROR:ssl_client_socket_impl.cc(877)] handshake failed; returned -1, SSL error code 1, net_error -100
+```
+
+原因：物理 GNOME 会话里 clash-verge 是靠 **GNOME 系统代理**生效的（gsettings
+`org.gnome.system.proxy`：mode=manual、127.0.0.1:7897），Chromium 在 GNOME 会话里读得到它；
+而 VNC 是 XFCE 会话（`XDG_CURRENT_DESKTOP` 甚至是空的），Chromium 读不到这套设置 → 走直连 →
+被墙的站点握手被切断，页面永远转圈。本机实测：不加参数时日志 20 次握手失败、页面打不开；
+加上 `--proxy-server` 后握手失败 0 次、headless 能抓到 google 的 HTML。
+
+所以 `session-browser` 在 VNC 分支里显式指定代理：
+
+```sh
+PROXY_ADDR="${VNC_PROXY:-127.0.0.1:7897}"
+PROXY_PORT="${PROXY_ADDR##*:}"
+if ss -lnt "sport = :$PROXY_PORT" | grep -q LISTEN; then
+    set -- --proxy-server="http://$PROXY_ADDR" \
+           --proxy-bypass-list="localhost;127.0.0.1;10.0.0.0/8;172.16.0.0/12;192.168.0.0/16" "$@"
+fi
+```
+
+- 代理没在跑时不会加这个参数，退回直连（国内站点照常，被墙站点打不开）。
+- 换了代理端口：临时用 `VNC_PROXY=127.0.0.1:7890`，或改脚本里的默认值。
+- **只对新启动的 Chrome 生效** —— 改完要关掉 VNC 里已经在跑的浏览器，再重新点图标。
+
+> 这里只修了浏览器。VNC 的终端里 `git`/`curl` 等仍然没有代理（`xstartup` 没导出
+> `http_proxy`）。需要的话在 `~/.vnc/xstartup` 里补上 `http_proxy`/`https_proxy`/`all_proxy`/`no_proxy`。
 
 ## 8. 会话日志与自动轮转
 
@@ -265,6 +298,11 @@ sudo systemctl restart vnc-user.service
 **窗口跑到物理显示器 / 报 `cannot open display: wayland-0`**
 
 见第 7 节；并确认 `xstartup` 里的 `unset WAYLAND_DISPLAY` 还在。
+
+**VNC 里浏览器页面一直转圈、日志全是 `handshake failed`**
+
+代理没生效。见第 7 节"第二个问题"；先确认代理在监听（`ss -lnt 'sport = :7897'`），
+然后**关掉 VNC 里已经在运行的浏览器重新打开** —— 代理参数只在启动时生效。
 
 **日志文件飞快变大**
 

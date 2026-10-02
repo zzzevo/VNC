@@ -28,5 +28,18 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${DISPLAY:-}" = ":0" ]; then
 fi
 
 # VNC / 其它远程 X 会话用自己的配置目录，因而有自己的实例、自己的显示器窗口。
+#
+# 远程 X 会话不是 GNOME 会话，Chromium 在那里读不到物理控制台依赖的
+# GNOME 系统代理（gsettings org.gnome.system.proxy，由 clash-verge 设置），
+# 会走直连 —— 被墙的站点就永远转圈（日志里全是 ssl_client_socket_impl
+# handshake failed / net_error -100）。这里显式指向本机代理，但仅当该代理
+# 确实在监听时才加。可用 VNC_PROXY=host:port 覆盖。
+PROXY_ADDR="${VNC_PROXY:-127.0.0.1:7897}"
+PROXY_PORT="${PROXY_ADDR##*:}"
+if ss -lnt "sport = :$PROXY_PORT" 2>/dev/null | grep -q LISTEN; then
+    set -- --proxy-server="http://$PROXY_ADDR" \
+           --proxy-bypass-list="localhost;127.0.0.1;10.0.0.0/8;172.16.0.0/12;192.168.0.0/16" "$@"
+fi
+
 mkdir -p "$VNC_PROFILE"
 exec "$CHROME" --user-data-dir="$VNC_PROFILE" "$@"
